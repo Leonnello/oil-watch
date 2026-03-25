@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 
 void main() {
   runApp(const MyApp());
-}
+} 
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -105,6 +106,37 @@ class _MyHomePageState extends State<MyHomePage> {
           mainAxisAlignment: .center,
           children: [
             const Text('US heard you have oil'),
+            const Text('Map'),
+            Container(
+              height: 200,
+              color: Colors.blue,
+              margin:EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: FlutterMap(
+                  mapController: MapController(),
+                  options: MapOptions(
+                    keepAlive: true
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.example.app',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                // Add your onPressed code here!
+              },
+              child: const Text('Gas Stations Near Me'),
+            ),
             const Text('git check'),
             const Text('You have pushed the button this many times:'),
             Text(
