@@ -1,5 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:http/http.dart' as http;
 
 void main() {
   runApp(const MyApp());
@@ -56,7 +60,14 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   int _counter = 0;
+  late Future<List<LatLng>> stationsFuture;
 
+  @override
+  void initState() {
+    super.initState();
+    stationsFuture = fetchGasStations();
+  }
+  
   void _incrementCounter() {
     setState(() {
       // This call to setState tells the Flutter framework that something has
@@ -66,6 +77,47 @@ class _MyHomePageState extends State<MyHomePage> {
       // called again, and so nothing would appear to happen.
       _counter++;
     });
+  }
+
+  Future<List<LatLng>> fetchGasStations() async {
+    // request to overpass API
+    const query = """
+      [out:json];
+      node
+        ["amenity"="fuel"]
+        (around:5000, 14.5995, 120.9842);
+      out;
+    """;
+
+    try {
+      final response = await http.post(
+        Uri.parse('https://overpass-api.de/api/interpreter'),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {'data': query},
+      );
+
+      if (response.statusCode != 200) {
+        debugPrint('Overpass API returned ${response.statusCode}: ${response.body}');
+        return [];
+      }
+
+      final data = jsonDecode(response.body);
+      if (data == null || data['elements'] == null) {
+        debugPrint('Overpass API returned unexpected data: ${response.body}');
+        return [];
+      }
+
+      final stations = (data['elements'] as List)
+        .where((e) => e['lat'] != null && e['lon'] != null)
+        .map((e) => LatLng(e['lat'], e['lon']))
+        .toList();
+
+      return stations;
+    } catch (error, stackTrace) {
+      debugPrint('fetchGasStations failed: $error');
+      debugPrint(stackTrace.toString());
+      return [];
+    }
   }
 
   @override
@@ -109,26 +161,59 @@ class _MyHomePageState extends State<MyHomePage> {
             const Text('Map'),
             Container(
               height: 200,
-              color: Colors.blue,
+              width: 200,
               margin:EdgeInsets.all(16),
               decoration: BoxDecoration(
+                color: Colors.blue,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.grey),
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: FlutterMap(
-                  mapController: MapController(),
-                  options: MapOptions(
-                    keepAlive: true
-                  ),
-                  children: [
-                    TileLayer(
-                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.example.app',
-                    ),
-                  ],
-                ),
+                child: FutureBuilder<List<LatLng>>(
+                  future: stationsFuture,
+                  builder: (context, snapshot){
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return Center(child: CircularProgressIndicator());
+                    }
+
+                    if (snapshot.hasError) {
+                      return Center(child: Text("Error loading stations"));
+                    }
+
+                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                      return Center(child: Text("No stations found"));
+                    }
+
+                    final stations = snapshot.data!;
+                    return FlutterMap(
+                      options: MapOptions(
+                        keepAlive: true,
+                        initialCenter: stations.isNotEmpty
+                          ? stations.first
+                          : LatLng(14.5995, 120.9842),
+                        initialZoom: 14,
+                      ),
+                      children: [
+                        TileLayer(
+                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                          userAgentPackageName: 'com.example.app',
+                        ),
+                        MarkerLayer(
+                          markers: stations.map((pos){
+                            return Marker(
+                              point: pos,
+                              width: 30,
+                              height: 30,
+                              child: Icon(Icons.local_gas_station, color: Colors.red),
+                            );
+                          }).toList(),
+                        ),
+                      ],
+                    );
+                  }
+                )
+                
               ),
             ),
             TextButton(
