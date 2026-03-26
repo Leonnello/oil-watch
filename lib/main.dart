@@ -105,6 +105,7 @@ class _MyHomePageState extends State<MyHomePage> {
             const Text('Map'),
             Container(
               height: 200,
+              width: 200,
               margin: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.blue,
