@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   runApp(const MyApp());
@@ -48,6 +49,13 @@ class _MyHomePageState extends State<MyHomePage> {
       _counter++;
     });
   }
+
+  void _refreshStations() {
+  setState(() {
+    // Re-assigning the future triggers the FutureBuilder to run again
+    stationsFuture = fetchGasStations();
+  });
+}
 
   Future<List<LatLng>> fetchGasStations() async {
     // request to overpass API
@@ -141,7 +149,10 @@ class _MyHomePageState extends State<MyHomePage> {
                       children: [
                         TileLayer(
                           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.example.app',
+                          userAgentPackageName: 'com.leon.oil_watch',
+                          additionalOptions: {
+                            'User-Agent': 'oil_watch (com.leon.oil_watch)',
+                          },
                         ),
                         MarkerLayer(
                           markers: stations.map((pos){
@@ -153,6 +164,14 @@ class _MyHomePageState extends State<MyHomePage> {
                             );
                           }).toList(),
                         ),
+                        RichAttributionWidget(
+                          attributions: [
+                            TextSourceAttribution(
+                              '© OpenStreetMap contributors',
+                              onTap: () => launchUrl(Uri.parse('https://www.openstreetmap.org/copyright')),
+                            ),
+                          ],
+                        ),
                       ],
                     );
                   }
@@ -161,9 +180,7 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
             TextButton(
-              onPressed: () {
-                // Add your onPressed code here!
-              },
+              onPressed: _refreshStations, 
               child: const Text('Gas Stations Near Me'),
             ),
             const Text('git check'),
