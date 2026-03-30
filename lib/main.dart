@@ -42,7 +42,8 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-    stationsFuture = fetchGasStations();
+    // Avoid auto-fetching until user explicitly requests it.
+    stationsFuture = Future.value([]);
   }
 
   void _incrementCounter() {
@@ -53,13 +54,70 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _refreshStations() {
     setState(() {
-      // Re-assigning the future triggers the FutureBuilder to run again
-      stationsFuture = fetchGasStations();
+      stationsFuture = fetchGasStations(promptForLocationPopup: true);
     });
   }
 
-  Future<void> _ensureLocationPermission() async {
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+  Future<Position> _getCurrentPosition({
+    required bool promptForGpsSettings,
+  }) async {
+    if (promptForGpsSettings && mounted) {
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        final shouldRequest = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Location Permission Required'),
+            content: const Text(
+              'This app needs location access to find nearby gas stations. Allow location access?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('No'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Yes'),
+              ),
+            ],
+          ),
+        );
+
+        if (shouldRequest == true) {
+          await Geolocator.requestPermission();
+        }
+      }
+    }
+
+    var serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled && promptForGpsSettings && mounted) {
+      final openSettings = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Enable Location Services'),
+          content: const Text(
+            'Please enable your device GPS/location services to locate nearby gas stations.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Open Settings'),
+            ),
+          ],
+        ),
+      );
+      if (openSettings == true) {
+        await Geolocator.openLocationSettings();
+        serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      }
+    }
+
     if (!serviceEnabled) {
       throw Exception(
         'Location services are disabled. Please enable GPS and retry.',
@@ -67,62 +125,90 @@ class _MyHomePageState extends State<MyHomePage> {
     }
 
     var permission = await Geolocator.checkPermission();
-
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        throw Exception(
-          'Location permissions are denied. Please grant permission and retry.',
-        );
-      }
+    }
+
+    if (permission == LocationPermission.denied) {
+      throw Exception(
+        'Location permission denied. Please grant location permission.',
+      );
     }
 
     if (permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Permission Required'),
+            content: const Text(
+              'Location permission is permanently denied. Open app settings to restore it.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+      await Geolocator.openAppSettings();
       throw Exception(
-        'Location permissions are permanently denied. Please enable them in settings.',
+        'Location permission permanently denied. Open app settings and grant permission.',
       );
     }
+
+    const LocationSettings locationSettings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 0,
+    );
+
+    return Geolocator.getCurrentPosition(locationSettings: locationSettings);
   }
 
-  Future<List<LatLng>> fetchGasStations() async {
-    try {
-      await _ensureLocationPermission();
-      //get location thru gps
-      // Define the settings (usually high or best for navigation)
-      const LocationSettings locationSettings = LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 100, // Optional: updates only if moved 100 meters
-      );
+  Future<List<LatLng>> _fetchStationsFromOverpass(
+    Position position, {
+    int radius = 5000,
+  }) async {
+    final query =
+        '''
+      [out:json][timeout:25];
+      node["amenity"="fuel"](around:$radius, ${position.latitude}, ${position.longitude});
+      out center;
+    ''';
 
-      Position position = await Geolocator.getCurrentPosition(
-        locationSettings: locationSettings,
-      );
-      // request to overpass API (with rate-limit retry support)
-      final query =
-          """
-        [out:json];
-        node["amenity"="fuel"](around:5000, ${position.latitude}, ${position.longitude});
-        out;
-      """;
+    final endpoints = [
+      'https://overpass-api.de/api/interpreter',
+      'https://lz4.overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
+      'https://overpass.openstreetmap.fr/api/interpreter',
+    ];
 
-      http.Response response;
-      int attempt = 0;
-      const int maxAttempts = 3;
-      const backoff = [1, 2, 5];
+    const backoff = [1, 2, 4, 8];
+    const maxAttempts = 4;
 
-      while (true) {
-        response = await http.post(
-          Uri.parse('https://overpass-api.de/api/interpreter'),
+    for (final endpoint in endpoints) {
+      for (var attempt = 0; attempt < maxAttempts; attempt++) {
+        final response = await http.post(
+          Uri.parse(endpoint),
           headers: {'Content-Type': 'application/x-www-form-urlencoded'},
           body: {'data': query},
         );
 
-        final bodyLower = response.body.toLowerCase();
-
         if (response.statusCode == 200) {
-          break;
+          final data = jsonDecode(response.body);
+          if (data == null || data['elements'] == null) {
+            return [];
+          }
+
+          return (data['elements'] as List)
+              .where((e) => e['lat'] != null && e['lon'] != null)
+              .map((e) => LatLng(e['lat'], e['lon']))
+              .toList();
         }
 
+        final bodyLower = response.body.toLowerCase();
         final isRateLimited =
             response.statusCode == 429 ||
             response.statusCode == 504 ||
@@ -130,36 +216,54 @@ class _MyHomePageState extends State<MyHomePage> {
             bodyLower.contains('dispatcher_client::request_read_and_idx') ||
             bodyLower.contains('quota');
 
-        if (isRateLimited && attempt < maxAttempts - 1) {
-          final wait = Duration(seconds: backoff[attempt]);
-          debugPrint(
-            'Overpass rate limited on attempt ${attempt + 1}, waiting ${wait.inSeconds}s',
+        if (!isRateLimited) {
+          throw Exception(
+            'Overpass API returned ${response.statusCode}: ${response.body}',
           );
-          await Future.delayed(wait);
-          attempt++;
-          continue;
         }
 
+        if (attempt < maxAttempts - 1) {
+          final wait = Duration(seconds: backoff[attempt]);
+          debugPrint(
+            'Overpass rate limited on $endpoint attempt ${attempt + 1}, waiting ${wait.inSeconds}s',
+          );
+          await Future.delayed(wait);
+        } else {
+          debugPrint(
+            'Endpoint $endpoint failed after $maxAttempts attempts, switching endpoint.',
+          );
+        }
+      }
+    }
+
+    throw Exception(
+      'Overpass endpoints are busy or rate-limited. Please try again later.',
+    );
+  }
+
+  Future<List<LatLng>> _fetchStationsWithFallback(Position position) async {
+    var stations = await _fetchStationsFromOverpass(position, radius: 5000);
+    if (stations.isNotEmpty) return stations;
+    stations = await _fetchStationsFromOverpass(position, radius: 10000);
+    return stations;
+  }
+
+  Future<List<LatLng>> fetchGasStations({
+    bool promptForLocationPopup = false,
+  }) async {
+    try {
+      final position = await _getCurrentPosition(
+        promptForGpsSettings: promptForLocationPopup,
+      );
+      final stations = await _fetchStationsWithFallback(position);
+      if (stations.isEmpty) {
         throw Exception(
-          'Overpass API returned ${response.statusCode}: ${response.body}',
+          'No gas stations found nearby. Try a different location or wait a moment and retry.',
         );
       }
-
-      final data = jsonDecode(response.body);
-      if (data == null || data['elements'] == null) {
-        debugPrint('Overpass API returned unexpected data: ${response.body}');
-        return [];
-      }
-
-      final stations = (data['elements'] as List)
-          .where((e) => e['lat'] != null && e['lon'] != null)
-          .map((e) => LatLng(e['lat'], e['lon']))
-          .toList();
-
       return stations;
     } catch (error) {
-      debugPrint('Failed to get location: $error');
-      // Forward the error to FutureBuilder so UI can show a message
+      debugPrint('Failed to get location/stations: $error');
       return Future.error(error.toString());
     }
   }
