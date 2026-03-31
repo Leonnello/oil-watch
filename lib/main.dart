@@ -280,7 +280,57 @@ class _MyHomePageState extends State<MyHomePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Text('US heard you have oil'),
+            //table widget
+            //TODO add dynamic data to the table (separate file)
+            Table(
+              border: TableBorder.all(color: Colors.grey),
+              children: [
+                TableRow(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      child: const Text(
+                        'Station Name',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      child: const Text(
+                        'Price',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      child: const Text(
+                        'Distance',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+                // Example data row
+                TableRow(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      child: const Text('Shell'),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      child: const Text('\$3.99'),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      child: const Text('2.5 miles'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
             const Text('Map'),
+            //map widget
             Container(
               height: 200,
               width: 200,
